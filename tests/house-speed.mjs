@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {readFile,readdir} from 'node:fs/promises';
+import {defaultFlavors,equalFlavorQuantities,moneyInput,moneyCents,formatMoneyInput,mergeFlavors} from '../lib/house-editor.ts';
+import {readHouseFlavorCatalogs,saveHouseFlavorCatalog} from '../lib/house-flavors.ts';
+import {houseActor,registerHouseStation} from '../lib/house-auth.ts';
+import {saveHouseOrder,getHouseOrder,houseSnapshot,advanceHousePreparation,releaseHouseDueOrders,changeHouseStatus} from '../lib/house.ts';
+import {claimHousePrint,beginHousePrint,finishHousePrint,requestHousePrint} from '../lib/house-print.ts';
+import {houseKitchenOrder} from '../lib/house-state.ts';
+import {receiptText} from '../lib/receipt.ts';
+import {rawBtJob,sendRawBtJob} from '../lib/rawbt.ts';
+
+assert.deepEqual(equalFlavorQuantities(100,3),[34,33,33]);
+assert.deepEqual(equalFlavorQuantities(1.5,2),[.75,.75]);
+assert.equal(equalFlavorQuantities(2,3),null);
+for(const [q,n] of [[100,7],[101,6],[33,2],[10,4],[100000,30]]){const parts=equalFlavorQuantities(q,n);assert.equal(parts.reduce((a,b)=>a+b,0),q);assert.ok(parts.every(Number.isInteger));assert.ok(Math.max(...parts)-Math.min(...parts)<=1);}
+let entered='';for(const char of '63')entered=moneyInput(entered+char);assert.equal(entered,'63');assert.equal(moneyCents(entered),6300);assert.equal(formatMoneyInput(moneyCents(entered)),'63,00');
+for(const [input,cents] of [['63,5',6350],['63.00',6300],['R$ 1.234,56',123456],['1.234',123400],['0',0],['0,50',50]])assert.equal(moneyCents(moneyInput(input)),cents,input);
+assert.equal(moneyInput('63,009'),'63,00');assert.equal(moneyInput(''),'');assert.equal(moneyCents(''),null);assert.equal(moneyCents('1.000.000,01'),null);assert.equal(moneyCents(formatMoneyInput(123456)),123456);assert.equal(moneyCents(moneyInput(',50')),50);assert.equal(moneyCents(moneyInput('-63,00')),null);
+assert.deepEqual(mergeFlavors([{name:'Queijo',quantity:20},{name:'queijo ',quantity:30},{name:'Coxinha',quantity:50}]),[{name:'Queijo',quantity:50},{name:'Coxinha',quantity:50}]);
+console.log('PASS: equal whole-unit division without lost remainder, custom quantities, currency typing/paste/clear/edit and duplicate flavor merging');
+
+const require=createRequire(import.meta.url),{Miniflare}=createRequire(require.resolve('wrangler/package.json'))('miniflare');
+const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("test")}}',compatibilityDate:'2026-05-15',d1Databases:['DB']}),DB=await mf.getD1Database('DB'),realNow=Date.now;
+let clock=Date.parse('2026-11-09T12:00:00Z');Date.now=()=>clock;
+const draft={customer:'Cliente fictício',phone:'21999990000',modality:'TAKEOUT',timing:'SCHEDULED',date:'2026-11-10',time:'13:30',leadMinutes:20,address:'',items:[{name:'Salgadinhos',quantity:100,flavors:[{name:'Coxinha',quantity:60},{name:'Queijo',quantity:40}],observations:'Sem salsicha'},{name:'Churros',quantity:12,flavors:[],observations:'Caixa separada'}],observations:'Conferir os dois produtos',totalCents:6300,paid:false};
+try{
+ for(const f of (await readdir(new URL('../drizzle/',import.meta.url))).filter(x=>x.endsWith('.sql')).sort())for(const sql of (await readFile(new URL('../drizzle/'+f,import.meta.url),'utf8')).split(';').filter(x=>x.trim()))await DB.prepare(sql).run();
+ const identity={userId:'owner-speed-test',email:'owner@lab.test',displayName:'Bruno'},owner=await houseActor(DB,identity.email,identity);
+ const station=async profile=>{const id=crypto.randomUUID();await registerHouseStation(DB,owner,{id,deviceId:crypto.randomUUID(),name:profile+' teste',profile});return houseActor(DB,identity.email,identity,id);};
+ const manager=await station('manager'),attendant=await station('attendant'),production=await station('production');
+ const expected={SALGADOS:['Bolinha de queijo','Travesseiro de pizza','Coxinha','Croquete de carne assada','Salsicha','Queijo com alho','Kibe'],CHURROS:['Doce de leite','Chocolate']};assert.deepEqual(defaultFlavors,expected);
+ const initial=await readHouseFlavorCatalogs(DB);for(const catalog of initial)assert.deepEqual(catalog.names,expected[catalog.kind]);
+ await DB.prepare('INSERT INTO house_flavor_catalogs(kind,names,revision,updated_at) VALUES (?,?,1,?)').bind('SALGADOS',JSON.stringify(['Queijo','Sabor de teste']),new Date(clock).toISOString()).run();
+ assert.deepEqual(await readHouseFlavorCatalogs(DB),initial,'a legacy editable catalog cannot hide or rename fixed flavors');
+ assert.deepEqual((await houseSnapshot(DB,manager,'2026-11-10','house')).flavorCatalogs,initial,'all stations receive the same fixed list');
+ await assert.rejects(saveHouseFlavorCatalog(DB,attendant,{kind:'SALGADOS',names:['Outro'],revision:1}),e=>e.status===409);
+ await assert.rejects(saveHouseFlavorCatalog(DB,production,{kind:'SALGADOS',names:['Outro'],revision:1}),e=>e.status===403);
+ console.log('PASS: exact predefined flavors without setup, legacy catalog compatibility and order-only availability');
+
+ const save=(order,old)=>saveHouseOrder(DB,attendant,{requestId:crypto.randomUUID(),...(old?{id:old.id,revision:old.revision}:{}),order});
+ const available=expected.SALGADOS.filter(name=>name!=='Salsicha'),parts=equalFlavorQuantities(100,available.length),flavors=available.map((name,i)=>({name,quantity:parts[i]}));
+ const immediate=await save({...draft,timing:'NOW',items:[{name:'Salgadinhos',quantity:100,flavors,observations:''},{name:'Mini churros',quantity:12,flavors:[{name:'Doce de leite',quantity:6},{name:'Chocolate',quantity:6}],observations:''}]});
+ assert.equal(immediate.status,'PREPARING');assert.equal(immediate.promisedAt,new Date(clock).toISOString());assert.equal(immediate.prepAt,immediate.promisedAt);assert.equal(immediate.date,'2026-11-09');assert.deepEqual(immediate.items[0].flavors,flavors);
+ const immediateScreen=await houseSnapshot(DB,production,'2026-11-10','kitchen');assert.ok(immediateScreen.orders.some(o=>o.id===immediate.id),'NOW appears in separation even with a different selected day');
+ const immediateJobs=immediateScreen.jobs.filter(j=>j.orderId===immediate.id&&j.state==='QUEUED');assert.equal(immediateJobs.length,1);assert.equal(immediateJobs[0].kind,'PRODUCTION');
+ const immediateTicket=await claimHousePrint(DB,production,immediateJobs[0].id),current=await beginHousePrint(DB,production,{jobId:immediateTicket.jobId,token:immediateTicket.token});
+ const immediateReceipt=receiptText(current.order);assert.doesNotMatch(immediateReceipt,/Salsicha/);for(const name of available)assert.ok(immediateReceipt.includes(name));assert.match(immediateReceipt,/6x Mini churros de Doce de leite/);assert.match(immediateReceipt,/6x Mini churros de Chocolate/);assert.match(immediateReceipt,/Retirada: Agora/);
+ await finishHousePrint(DB,production,{jobId:immediateTicket.jobId,token:immediateTicket.token,result:'submitted'});
+ assert.deepEqual(await readHouseFlavorCatalogs(DB),initial,'omitting a missing flavor never changes another order’s choices');
+ console.log('PASS: NOW bypasses schedule/lead, reaches separation with a single production print, and includes only selected flavors plus churros');
+ let order=await save(draft);const before={promisedAt:order.promisedAt,date:order.date,time:order.time,leadMinutes:order.leadMinutes};
+ const control=await requestHousePrint(DB,manager,{orderId:order.id,requestId:crypto.randomUUID(),reprint:false});assert.equal(control.kind,'CONTROL');assert.equal((await getHouseOrder(DB,order.id)).status,'SCHEDULED');
+ const input={id:order.id,revision:order.revision,requestId:crypto.randomUUID()};
+ for(const actor of [production])await assert.rejects(advanceHousePreparation(DB,actor,input),e=>e.status===403);
+ const outcomes=await Promise.allSettled([advanceHousePreparation(DB,manager,input),advanceHousePreparation(DB,manager,{...input,requestId:crypto.randomUUID()})]);assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);
+ const successful=outcomes.findIndex(r=>r.status==='fulfilled');order=outcomes[successful].value;assert.equal(order.status,'PREPARING');assert.equal(order.prepAt,new Date(clock).toISOString());assert.ok(order.advancedAt);
+ for(const key of Object.keys(before))assert.equal(order[key],before[key],'advance preserves '+key);
+ assert.deepEqual(order.items[0].flavors,[{name:'Coxinha',quantity:60},{name:'Queijo',quantity:40}]);
+ if(successful===0)assert.equal((await advanceHousePreparation(DB,manager,input)).revision,order.revision);
+ let screen=await houseSnapshot(DB,production,'2026-11-09','kitchen');assert.ok(screen.orders.some(o=>o.id===order.id));
+ let jobs=screen.jobs.filter(j=>j.orderId===order.id&&j.state==='QUEUED');assert.equal(jobs.length,1);assert.equal(jobs[0].kind,'PRODUCTION');
+ await assert.rejects(beginHousePrint(DB,manager,{jobId:control.jobId,token:control.token}),/mudou/);
+ let ticket=await claimHousePrint(DB,production,jobs[0].id);
+ order=await save({...draft,phone:'21999991111'},order);assert.equal(order.status,'PREPARING');assert.ok(order.advancedAt);assert.equal(order.prepAt,new Date(clock).toISOString());
+ await assert.rejects(beginHousePrint(DB,production,{jobId:ticket.jobId,token:ticket.token}),/mudou/);
+ screen=await houseSnapshot(DB,production,'2026-11-09','kitchen');jobs=screen.jobs.filter(j=>j.orderId===order.id&&j.state==='QUEUED');assert.equal(jobs.length,1);ticket=await claimHousePrint(DB,production,jobs[0].id);
+ let socket,sent;const payload=rawBtJob(ticket.order,'advance-driver-test'),printing=sendRawBtJob(payload,{createSocket:()=>socket={onopen:null,onmessage:null,onerror:null,onclose:null,bufferedAmount:0,close(){},send(data){sent=JSON.parse(data);queueMicrotask(()=>this.onmessage?.({data:JSON.stringify({responseType:'success',jobId:sent.idJob})}));}},beforeSend:async()=>{const current=await beginHousePrint(DB,production,{jobId:ticket.jobId,token:ticket.token});Object.assign(payload,rawBtJob(current.order,payload.idJob));}});
+ socket.onopen();const result=await printing;await finishHousePrint(DB,production,{jobId:ticket.jobId,token:ticket.token,result:result.completion});
+ const bytes=Buffer.from(sent.commands[0].base64,'base64').toString('latin1');for(const part of ['SALGADOS DA GALEGA','Cliente ficticio','21999991111','10/11/2026','13:30','60x Coxinha','40x Queijo','12x Churros','Sem salsicha','Caixa separada','R$ 63,00','PAGAMENTO: A COBRAR'])assert.ok(bytes.includes(part),'missing '+part);
+ const normal=receiptText(houseKitchenOrder(order));assert.ok(normal.startsWith('SALGADOS DA GALEGA\n--------------------------------\n'));assert.doesNotMatch(normal,/CASA - PEDIDO|VIA DE CONTROLE|VERSAO:|TESTE - NAO ENTREGAR|ANTECEDENCIA:|PREPARO:|CUPOM NAO FISCAL/);assert.equal(normal.match(/21999991111/g).length,1);assert.equal(normal.match(/R\$ 63,00/g).length,1);assert.ok(normal.split('\n').every(l=>l.length<=32));
+ assert.match(receiptText(houseKitchenOrder({...order,status:'CANCELLED'},'CANCEL')),/CANCELAR PEDIDO\s+DO/);assert.match(receiptText(houseKitchenOrder(order,'UPDATE')),/ALTERACAO DO PEDIDO/);
+ clock=Date.parse(before.promisedAt);await releaseHouseDueOrders(DB);assert.equal((await houseSnapshot(DB,manager,'2026-11-10','house')).jobs.filter(j=>j.orderId===order.id&&j.kind==='PRODUCTION'&&j.state==='QUEUED').length,0);
+ const later=await save({...draft,date:'2026-11-11'},order);assert.equal(later.status,'SCHEDULED');assert.equal(later.advancedAt,null);
+ await changeHouseStatus(DB,manager,{id:later.id,revision:later.revision,requestId:crypto.randomUUID()},'cancel');await assert.rejects(advanceHousePreparation(DB,manager,{id:later.id,revision:later.revision+1,requestId:crypto.randomUUID()}),e=>e.status===409);
+ console.log('PASS: confirmed early preparation, preserved promise, concurrent/idempotent release, kitchen automatic print with current receipt, no duplicate, edits retain manual release and cancelled orders stay closed');
+}finally{Date.now=realNow;await mf.dispose();}

@@ -1,0 +1,2 @@
+CREATE INDEX `house_alerts_kind_created` ON `house_alerts` (`kind`,`created_at`);--> statement-breakpoint
+CREATE INDEX `house_events_order_revision_kind` ON `house_events` (`order_id`,`revision`,`kind`);

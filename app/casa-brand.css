@@ -1,0 +1,44 @@
+/* Casa-only branding. No root tokens, iFood cards, buttons or queue styles change. */
+.house-board,.house-dialog,.house-chat{--line:#e6dac7}
+.house-card{border-color:#e5d5b9;border-top-color:#c42028;color:#302b25}
+.house-card[data-house-status="SCHEDULED"]{border-top-color:#e5ad13}
+.house-card[data-house-status="FINISHED"]{border-top-color:#8e867b}
+.house-card[data-house-status="CANCELLED"]{border-top-color:#c42028;background:#fff7f5}
+.house-card-meta{color:#73541f}.house-status{background:#fff0bc;color:#644600}
+.house-promise{background:#fff2c7}.house-prep{background:#fffaf0;color:#7b5515}
+.house-item-list>section{border-color:#eee4d5}.house-delivery,.house-received{border-color:#eee4d5}
+.house-money>span{background:#fff1c1;color:#5d430e}.house-received,.house-archived-at{color:#736650}
+.house-actions{background:#fff9ea}.house-menu>div{border-color:#e5d5b9}.house-menu button:hover{background:#fff3cf}
+.house-empty{border-color:#dbc8a6;color:#78684f}.house-board .count{background:#fff0bd;color:#684b10}
+.house-board .button.primary,.house-dialog .button.primary,.house-chat .button.primary{background:#bf2028;border-color:#bf2028;color:#fff}
+.house-board .button.primary:hover,.house-dialog .button.primary:hover,.house-chat .button.primary:hover{background:#9e1720;border-color:#9e1720}
+.house-board .button:focus-visible,.house-dialog .button:focus-visible,.house-chat .button:focus-visible{outline:3px solid #e5ad13;outline-offset:2px}
+.house-board .date-filters .button[aria-pressed=true]{background:#fff0b5;border-color:#b98700;color:#604300}
+.house-dialog{border-color:#dfd0b5;color:#302b25}.house-dialog::backdrop{background:#28211bc0}
+.house-dialog .field input,.house-dialog .field select,.house-dialog .field textarea{border-color:#d6c8b2;color:#302b25}
+.house-dialog .field input:disabled{background:#f3eee5;color:#756b5d}.house-dialog .house-now input{accent-color:#bf2028}
+.prep-hint,.editor-item{background:#fff9e9;border-color:#e7d7b4}.house-dialog .text-button,.house-chat .text-button{color:#a11b23}
+.flavor-choices>button{border-color:#d9c49e;color:#513d23}.flavor-choices>button[aria-pressed=true]{background:#ffedaf;border-color:#b47f00;color:#583b00}
+.house-chat{border-color:#e1d3bc;box-shadow:0 4px 20px #54391408}.house-chat>header{background:#fff2c8}
+.chat-message{background:#f6f1e8}.chat-message.mine{background:#ffefbc}.chat-message.pending{border-color:#cba451}
+.chat-sender time,.chat-empty,.mention-suggestions span{color:#786c57}.mention-chip{background:#ffe18d;color:#654300}
+.chat-composer{background:#fff9ec}.chat-composer textarea,.mention-suggestions{border-color:#d7bd8a}
+.mention-suggestions button{border-color:#eee3ce}.mention-suggestions button:hover{background:#fff3cf}
+.draft-ref{background:#ffedb5;color:#68490e}.house-day-heading p{color:#78664c}
+.house-cancellations{display:grid;gap:12px;margin-bottom:22px}
+.house-cancellations article{position:relative;padding:18px 18px 18px 64px;background:#fff1e9;border:1px solid #d99280;border-left:5px solid #bf2028;border-radius:6px;color:#85202a}
+.house-cancellations article>div{display:flex;align-items:flex-start;gap:10px;font-size:17px;line-height:1.5;overflow-wrap:anywhere}
+.house-cancellations svg{flex-shrink:0}.house-cancellations p{margin:6px 0;font-size:15px}.house-cancellations time{font-size:14px;color:#763e30}
+.house-cancellation-close{position:absolute;top:8px;left:6px;min-width:44px;min-height:44px;color:#a21c25;background:transparent;border:0}
+.house-cancellation-close:hover{background:#ffdfd4}.house-cancellation-close:focus-visible{outline:3px solid #b98400}
+
+/* The delivery recipient list belongs to Casa; iFood styles are untouched. */
+.whatsapp-recipient-settings{border-top:1px solid #ded9c8;margin-top:24px;padding-top:20px}
+.whatsapp-recipient-list{list-style:none;margin:12px 0;padding:0;display:grid;gap:8px}
+.whatsapp-recipient-list li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;background:#fff7df;border:1px solid #e1c46b;border-radius:6px}
+.whatsapp-recipient-list li>div{display:grid;gap:2px;overflow-wrap:anywhere;min-width:0}
+.whatsapp-recipient-settings fieldset{display:grid;gap:12px;min-width:0}
+.whatsapp-consent{display:flex;align-items:flex-start;gap:9px;font-size:14px;line-height:1.5}
+.whatsapp-consent input{width:20px;height:20px;flex-shrink:0;margin-top:1px;accent-color:#c42028}
+.whatsapp-actions .field{width:100%;min-width:0}
+.whatsapp-actions select{max-width:100%;width:100%}

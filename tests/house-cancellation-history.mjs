@@ -1,0 +1,62 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {readFile,readdir} from 'node:fs/promises';
+import {houseActor,registerHouseStation} from '../lib/house-auth.ts';
+import {saveHouseOrder,houseSnapshot,getHouseOrder,changeHouseStatus,separateHouseOrder} from '../lib/house.ts';
+import {requestHousePrint,claimHousePrint,beginHousePrint,finishHousePrint} from '../lib/house-print.ts';
+import {houseKitchenOrder} from '../lib/house-state.ts';
+import {houseWorkspaceQueues} from '../lib/house-queues.ts';
+import {createHouseNotificationState,collectHouseNotifications,hasPendingHouseCancellation} from '../lib/house-notifications.ts';
+import {receiptText,escPosBytes,houseFreezerFooter} from '../lib/receipt.ts';
+import {receiptWhatsappLink} from '../lib/receipt-qr.ts';
+import {playCancellationAlarm} from '../lib/order-sound.ts';
+const require=createRequire(import.meta.url),{Miniflare}=createRequire(require.resolve('wrangler/package.json'))('miniflare');
+const mf=new Miniflare({modules:true,script:'export default{fetch(){return new Response("test")}}',compatibilityDate:'2026-05-15',d1Databases:['DB']}),DB=await mf.getD1Database('DB'),realNow=Date.now;
+let clock=Date.parse('2026-11-10T12:00:00Z');Date.now=()=>clock;
+try{
+ for(const f of(await readdir(new URL('../drizzle/',import.meta.url))).filter(f=>f.endsWith('.sql')).sort())for(const sql of(await readFile(new URL('../drizzle/'+f,import.meta.url),'utf8')).split(';').filter(s=>s.trim()))await DB.prepare(sql).run();
+ const identity={userId:'cancel-history-fixture',email:'owner@lab.test',displayName:'Bruno'},owner=await houseActor(DB,identity.email,identity);
+ const station=async profile=>{const id=crypto.randomUUID();await registerHouseStation(DB,owner,{id,deviceId:crypto.randomUUID(),name:profile,profile});return houseActor(DB,identity.email,identity,id);};
+ const attendant=await station('attendant'),manager=await station('manager'),production=await station('production'),other=await station('production');
+ const draft={customer:'Cliente fictício',phone:'21999990000',modality:'TAKEOUT',timing:'NOW',date:'2026-11-10',time:'09:00',address:'',items:[{name:'Churros',quantity:50,flavors:[{name:'Doce de leite',quantity:50}],observations:'Caixa separada'}],observations:'Não incluir no cancelamento',totalCents:3000,paid:false,leadMinutes:60};
+ const save=over=>saveHouseOrder(DB,attendant,{requestId:crypto.randomUUID(),order:{...draft,...over}});
+ const baseline=await houseSnapshot(DB,production,draft.date,'kitchen'),notices=createHouseNotificationState();assert.deepEqual(collectHouseNotifications(notices,baseline),{urgent:false,ordinary:false});
+ let wrong=await save({customer:'José de Teste com Nome Comprido'});
+ const ticket=await requestHousePrint(DB,production,{orderId:wrong.id,requestId:crypto.randomUUID(),reprint:true});await beginHousePrint(DB,production,ticket);await finishHousePrint(DB,production,{...ticket,result:'driver'});
+ clock+=15*60000;
+ wrong=await changeHouseStatus(DB,manager,{id:wrong.id,revision:wrong.revision,requestId:crypto.randomUUID()},'cancel');
+ const snap=await houseSnapshot(DB,production,draft.date,'kitchen'),cancel=snap.jobs.find(j=>j.orderId===wrong.id&&j.kind==='CANCEL');assert.ok(cancel);assert.equal(snap.alerts.length,0,'production still does not manage Casa alerts');
+ assert.equal(collectHouseNotifications(notices,snap).urgent,true,'cancellation alarm reaches production even with no private alerts and manager already aware');
+ assert.equal(collectHouseNotifications(notices,{...snap,jobs:snap.jobs.map(j=>({...j,state:'SENDING'}))}).urgent,false,'polling and print progress never replay the same cancellation alarm');
+ assert.equal(hasPendingHouseCancellation(snap),true);
+ const cancellation=await claimHousePrint(DB,production,cancel.id),fresh=await beginHousePrint(DB,production,cancellation),plain=receiptText(fresh.order),print=Buffer.from(escPosBytes(fresh.order));
+ assert.equal(plain.replace(/\s+/g,' '),'CANCELAR PEDIDO DO JOSE DE TESTE COM NOME COMPRIDO DO HORARIO 09:00');
+ assert.ok(plain.split('\n').every(l=>l.length<=16));assert.doesNotMatch(plain,/GALEGA|Churros|PAGAMENTO|TOTAL|WhatsApp|carinho|C000/);assert.equal(receiptWhatsappLink(fresh.order),null);
+ assert.ok(print.includes(Buffer.from([0x1d,0x21,0x12])),'cancellation is double width and triple height');assert.ok(!print.includes(Buffer.from([0x1d,0x76,0x30])),'cancellation has no QR, logo or other raster content');
+ await finishHousePrint(DB,production,{...cancellation,result:'driver'});assert.equal(hasPendingHouseCancellation(await houseSnapshot(DB,production,draft.date,'kitchen')),true,'a new visual notice remains within its 15-minute lifetime even after the paper was sent');
+ console.log('PASS: cancellation prints only a large instruction, full safe customer name and original São Paulo order time; alarm reaches kitchen without private alert permissions and is deduplicated');
+
+ const preparing=await save({customer:'Finalizado sem marcar separado'}),finish={id:preparing.id,revision:preparing.revision,requestId:crypto.randomUUID()};
+ const finished=await changeHouseStatus(DB,production,finish,'finish');assert.equal((await changeHouseStatus(DB,production,finish,'finish')).id,finished.id);assert.equal(finished.kitchenStage,'WAITING','finalizing does not invent a physical separation action');
+ const counter=await houseSnapshot(DB,other,draft.date,'counter'),kitchen=await houseSnapshot(DB,other,draft.date,'kitchen');
+ assert.ok(!counter.orders.some(o=>o.id===finished.id));assert.ok(!kitchen.orders.some(o=>o.id===finished.id));
+ assert.ok(counter.archivedOrders.some(o=>o.id===finished.id));assert.ok(counter.archivedOrders.some(o=>o.id===wrong.id));assert.ok(kitchen.archivedOrders.some(o=>o.id===finished.id));assert.ok(!kitchen.archivedOrders.some(o=>o.id===wrong.id));
+ let queues=houseWorkspaceQueues(kitchen.orders,kitchen.archivedOrders);assert.ok(queues.separated.some(o=>o.id===finished.id));assert.ok(!queues.waiting.some(o=>o.id===finished.id));
+ const raced=houseWorkspaceQueues([preparing],[finished]);assert.equal(raced.active.length,0);assert.equal(raced.separated.filter(o=>o.id===finished.id).length,1,'a transition between database reads never duplicates a finished order');
+ const copy=await requestHousePrint(DB,other,{orderId:finished.id,requestId:crypto.randomUUID(),reprint:true});assert.equal(copy.kind,'REPRINT');assert.match(receiptText(copy.order),/50x Churros de Doce de leite/);assert.equal((await getHouseOrder(DB,finished.id)).status,'FINISHED');
+ const tray=await save({customer:'Separado e finalizado'});await separateHouseOrder(DB,production,{id:tray.id,revision:tray.revision,requestId:crypto.randomUUID()});await changeHouseStatus(DB,production,{id:tray.id,revision:tray.revision,requestId:crypto.randomUUID()},'finish');const after=await houseSnapshot(DB,other,draft.date,'kitchen');queues=houseWorkspaceQueues(after.orders,after.archivedOrders);assert.equal(queues.separated.filter(o=>o.id===tray.id).length,1);
+ await assert.rejects(changeHouseStatus(DB,production,{id:tray.id,revision:tray.revision,requestId:crypto.randomUUID()},'cancel'),e=>e.status===403);
+ console.log('PASS: Casa finalization persists in counter history and kitchen separated list on another station, without duplicates, lost archive, private chat access or reactivating production');
+
+ const base=houseKitchenOrder(preparing),day={at:new Date(clock).toISOString(),revision:preparing.revision,state:'SENT',completion:'driver',changed:false},freezer={...base,houseDayPrint:day};
+ assert.equal(houseFreezerFooter(freezer),'PEDIDO DA CASA JA SEPARADO PELA MANHA, CHECAR NO FREEZER');assert.ok(receiptText(freezer).endsWith('CHECAR NO FREEZER'));
+ const physical=Buffer.from(escPosBytes(freezer));assert.ok(physical.indexOf(Buffer.from([0x1d,0x21,0x77]))>physical.indexOf(Buffer.from([0x1d,0x76,0x30])),'giant exclamation prints below the customer QR');assert.ok(physical.includes(Buffer.from([0x1d,0x21,0x11])));
+ for(const x of [{...day,state:'REVIEW'},{...day,changed:true},{...day,completion:'submitted'}])assert.doesNotMatch(houseFreezerFooter({...freezer,houseDayPrint:x}),/JA SEPARADO/);
+ assert.equal(houseFreezerFooter({...freezer,houseDayCopy:true}),'');assert.equal(houseFreezerFooter({...freezer,cancelled:true}),'');assert.equal(houseFreezerFooter({...freezer,source:'IFOOD'}),'');
+ console.log('PASS: bottom warning has giant ESC/POS exclamation and large text, preserves original receipt and QR, and distinguishes changed, uncertain and submitted-only morning copies');
+
+ const events=[];const param=kind=>({setValueAtTime:(v,t)=>events.push({kind,v,t}),exponentialRampToValueAtTime:(v,t)=>events.push({kind,v,t})});
+ const audio={currentTime:10,destination:{},createOscillator(){const o={frequency:param('frequency'),connect(){},disconnect(){},start(t){events.push({kind:'start',t,type:o.type});},stop(t){events.push({kind:'stop',t});}};return o;},createGain(){return{gain:param('gain'),connect(){},disconnect(){}};}};
+ playCancellationAlarm(audio);assert.equal(events.filter(e=>e.kind==='start').length,8);assert.ok(events.filter(e=>e.kind==='start').every(e=>e.type==='square'));assert.ok(Math.max(...events.filter(e=>e.kind==='stop').map(e=>e.t))-10>3.5);assert.ok(events.filter(e=>e.kind==='gain').every(e=>e.v<=.45));assert.equal(new Set(events.filter(e=>e.kind==='frequency').map(e=>e.v)).size,2);
+ console.log('PASS: cancellation uses a distinct alternating 3.5-second alarm with bounded gain; device media volume and browser activation remain required');
+}finally{Date.now=realNow;await mf.dispose();}

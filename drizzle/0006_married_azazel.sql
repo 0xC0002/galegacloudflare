@@ -1,0 +1,1 @@
+ALTER TABLE `received_orders` ADD `kitchen_needs_review` integer DEFAULT 0 NOT NULL;

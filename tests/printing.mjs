@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import { normalizeOrder, TEST_MERCHANT } from '../lib/ifood.ts';
+import { receiptText, escPosBytes, rawBtUri } from '../lib/receipt.ts';
+const raw={id:'receipt-test',displayId:'8197',isTest:true,category:'FOOD',merchant:{id:TEST_MERCHANT},customer:{name:'Cliente de teste',documentNumber:'11111111111',segmentation:'CONFIDENTIAL-FIXTURE'},orderType:'DELIVERY',orderTiming:'IMMEDIATE',createdAt:'2026-10-23T01:00:00Z',items:[{name:'100 salgadinhos',quantity:1,options:[{name:'Coxinha',quantity:40},{name:'Bolinha de queijo',quantity:60}]},{name:'Churros',quantity:20,observations:'Separar os recheios',options:[{name:'Chocolate',quantity:10},{name:'Doce de leite',quantity:10}]},{name:'Pão de queijo',quantity:10},{name:'Refrigerante 2 L',quantity:1}],observations:'Conferir as bebidas\nEnviar caixas separadas.',delivery:{deliveredBy:'MERCHANT',pickupCode:'1234',observations:'Tocar o interfone',deliveryAddress:{formattedAddress:'Rua de teste, 123',complement:'Casa dos fundos',neighborhood:'Bairro de teste',city:'Rio de Janeiro',state:'RJ'}},total:{orderAmount:65},payments:{prepaid:20,pending:45,methods:[{value:20,method:'CREDIT',type:'ONLINE',card:{brand:'VISA'}},{value:45,method:'CASH ',type:'OFFLINE',cash:{changeFor:50}}]},benefits:[{value:15,sponsorshipValues:[{name:'IFOOD',value:10},{name:'MERCHANT',value:5}]}]};
+const order=normalizeOrder(raw,'2026-10-23T01:00:01Z'),before=structuredClone(order);
+const text=receiptText(order);
+for(const label of ['PEDIDO #8197','40x Coxinha','60x Bolinha de queijo','20x Churros','10x Chocolate','10x Doce de leite','10x Pao de queijo','1x Refrigerante 2 L','TESTE - NAO ENTREGAR','Tocar o interfone','Rua de teste, 123','CODIGO DE COLETA: 1234','TOTAL DO PEDIDO: R$ 65,00','PAGO ONLINE: Credito / VISA','COBRAR NA ENTREGA','TROCO: R$ 5,00','A COBRAR: R$ 45,00','CUPOM: R$ 15,00','iFood: R$ 10,00','Loja: R$ 5,00']) assert.ok(text.includes(label),'Missing receipt content: '+label);
+assert.ok(!text.includes('11111111111')&&!text.includes('CONFIDENTIAL-FIXTURE'),'non-fiscal kitchen ticket must not expose fiscal document or segmentation');
+assert.ok(text.split('\n').every(line=>line.length<=32),'58 mm lines must fit 32 columns');
+assert.deepEqual(order,before,'printing must not change separation or iFood status');
+const bytes=escPosBytes(order),uri=rawBtUri(order);
+assert.ok(uri.startsWith('rawbt:base64,'));assert.deepEqual(new Uint8Array(Buffer.from(uri.slice('rawbt:base64,'.length),'base64')),bytes);
+assert.deepEqual([...bytes.slice(0,5)],[27,64,27,116,0]);
+console.log('PASS: full multi-product receipt, 58 mm wrapping, mixed payment change, coupon sponsorship and RawBT ESC/POS payload');
+
+const malicious=normalizeOrder({...raw,items:[{name:'A'.repeat(100),quantity:0.5,unit:'KG',observations:'\x1b@\x1dV\x00Não cortar'}],observations:'\x1b\x40 texto'},'2026-10-23T01:00:01Z');
+const maliciousBytes=escPosBytes(malicious),safeText=receiptText(malicious);
+assert.equal([...maliciousBytes].filter(value=>value===27).length,6,'user-controlled text must not inject printer commands');
+assert.ok(safeText.split('\n').every(line=>line.length<=32));assert.match(safeText,/0,5 KG/);
+const noTotal=normalizeOrder({...raw,total:undefined,payments:undefined,benefits:undefined},raw.createdAt);
+assert.ok(!receiptText(noTotal).includes('TOTAL DO PEDIDO:'));assert.match(receiptText(noTotal),/Pagamento: consultar iFood/);
+const zero=normalizeOrder({...raw,total:{orderAmount:0},payments:{prepaid:0,pending:0,methods:[]}},raw.createdAt);
+assert.match(receiptText(zero),/TOTAL DO PEDIDO: R\$ 0,00/);
+const legacy={...order};delete legacy.receipt;assert.match(receiptText(legacy),/Pagamento: consultar iFood/);
+assert.match(receiptText({...order,status:'CANCELLED',cancelled:true}),/PEDIDO CANCELADO/);
+const large={...order,items:Array.from({length:1000},()=>order.items[0])};assert.ok(rawBtUri(large).length>8192);
+console.log('PASS: control-byte sanitization, long labels, unknown versus zero totals, legacy tickets and large print payloads');

@@ -1,0 +1,1 @@
+ALTER TABLE `received_events` ADD `acknowledged_at` text;
