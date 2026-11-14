@@ -4,9 +4,9 @@ Cópia de teste da versão 16 do Laboratório Casa, fonte 098197301783d33d76d2a4
 
 ## Estado desta entrega
 
-Código preparado, compilado e validado localmente. Publicação externa pendente de autenticação do titular na Cloudflare. Nenhum serviço pago contratado, domínio alterado ou banco remoto criado nesta preparação. A aplicação só deve ser declarada hospedada depois do retorno real de wrangler deploy e das conferências da URL.
+Bruno publicou e testou a aplicação em https://galega-casa-cloudflare-teste-4e06b7.brunoantunesrj.workers.dev/. A fonte enviada está na branch master de https://github.com/0xC0002/galegacloudflare. A conferência externa de 13/11/2026 retornou a tela de entrada com HTTP 200, redirecionamento da página inicial para /entrar e HTTP 401 na API sem sessão. O cadastro inicial já foi concluído. Nenhuma republicação foi feita durante a revisão do repositório.
 
-O laboratório existente continua em https://galega-laboratorio-casa.shot9.chatgpt.site. Seus pedidos, contatos e conexão da Meta não foram copiados. O banco desta cópia começa vazio. As duas aplicações não compartilham pedidos automaticamente.
+O laboratório existente continua em https://galega-laboratorio-casa.shot9.chatgpt.site. Seus pedidos, contatos e conexão da Meta não foram copiados na preparação. A Cloudflare usa banco independente; clonar este repositório não copia dados nem segredos. As duas aplicações não compartilham pedidos automaticamente.
 
 ## Acesso sem ChatGPT
 
@@ -38,7 +38,9 @@ Publicar:
 npm run deploy:cloudflare
 ```
 
-O script valida o escopo de teste, cria um Worker/banco com nome exclusivo, aplica as migrações somente nesse banco, compila e publica, configura segredos novos e confere o bloqueio de acesso anônimo. Não cria assinatura paga nem altera DNS. Interrupção depois de criar recurso deve ser resolvida conferindo o destino registrado, sem apagar ou criar recursos por suposição.
+O comando usa scripts/deploy-cloudflare.mjs, que conserva os ajustes de execução no Windows e de espera pela propagação da publicação. Em um clone novo da branch master, o script reconhece a conta, o nome e o ID do banco já declarados em wrangler.jsonc; confere esse banco na conta autenticada antes de aplicar migrações. A ausência do arquivo local .cloudflare-target.json não deve criar outro Worker nem renomear o banco existente. Conflitos de conta, nome, banco ou arquivo local inválido interrompem a publicação.
+
+Somente uma configuração inicial com o ID de banco vazio de exemplo cria Worker/banco exclusivos. O script compila antes de publicar, preserva os segredos existentes e confere o bloqueio de acesso anônimo. Não cria assinatura paga nem altera DNS. Esta revisão não habilita publicação automática; ao configurar uma conexão de builds na Cloudflare, selecionar a branch master.
 
 A chave de autenticação e a chave de criptografia Meta não são sobrescritas em republicações. O código de primeiro acesso é gravado somente em .cloudflare-onboarding.json, privado e excluído deste pacote. Após concluir a inicialização, ele não permite criar outro responsável. Não guardar esse arquivo em Git ou incluí-lo em backups de código compartilhados.
 
