@@ -4,6 +4,7 @@ import {randomBytes} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {checkCloudflareSource,validateCloudflareTarget} from './check-cloudflare.mjs';
 import {prepareCloudflareDeployConfig} from './prepare-cloudflare-config.mjs';
+import {resolveCloudflareTarget} from './cloudflare-target-state.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url)),configPath=new URL('../wrangler.jsonc',import.meta.url),targetPath=new URL('../.cloudflare-target.json',import.meta.url);
 const cliVersion='4.160.1',win=process.platform==='win32',npx=win?'npx.cmd':'npx';
 // Node recente recusa abrir .cmd sem shell no Windows (spawn EINVAL): no Windows o comando vai pelo cmd.exe, com aspas nos argumentos que precisam.
@@ -17,11 +18,10 @@ const accounts=who.accounts||who.user?.accounts||[],requested=process.env.CLOUDF
 const account=requested?accounts.find(a=>a.id===requested):accounts.length===1?accounts[0]:null;
 if(!account)throw new Error('Selecione explicitamente CLOUDFLARE_ACCOUNT_ID. Contas disponíveis: '+accounts.map(a=>`${a.name} (${a.id})`).join(', '));
 if(config.account_id&&config.account_id!==account.id)throw new Error('A configuração pertence a outra conta. Publicação interrompida.');
-config.account_id=account.id;
-let target=null;try{target=JSON.parse(await readFile(targetPath,'utf8'));}catch{}
-if(target&&target.accountId!==account.id)throw new Error('Este teste já foi vinculado a outra conta.');
-if(!target){const suffix=randomBytes(3).toString('hex');config.name='galega-casa-cloudflare-teste-'+suffix;config.d1_databases[0].database_name=config.name;target={accountId:account.id,workerName:config.name,databaseName:config.name,sourceCommit:'098197301783d33d76d2a4b96e3ef60d43800cd6'};await writeFile(targetPath,JSON.stringify(target,null,2)+'\n',{mode:0o600});}
-if(target.workerName!==config.name||target.databaseName!==config.d1_databases[0].database_name)throw new Error('O destino foi alterado. Revise a cópia antes de publicar.');
+let storedTarget=null;try{storedTarget=JSON.parse(await readFile(targetPath,'utf8'));}catch(error){if(error.code!=='ENOENT')throw new Error('Não foi possível ler o destino local. Confira .cloudflare-target.json antes de publicar.');}
+const plan=resolveCloudflareTarget(config,account.id,storedTarget),target=plan.target;
+Object.assign(config,plan.config);
+await writeFile(targetPath,JSON.stringify(target,null,2)+'\n',{mode:0o600});
 await writeFile(configPath,JSON.stringify(config,null,2)+'\n');
 const databases=json(await wrangler(['d1','list','--json','--config','wrangler.jsonc']));
 if(config.d1_databases[0].database_id==='00000000-0000-4000-8000-000000000000'){
