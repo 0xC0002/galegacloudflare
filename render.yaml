@@ -1,0 +1,18 @@
+# Prepared configuration only. Creating this paid worker requires an authorized account and budget.
+# This Blueprint deploys only the receiver; the website and database stay in Sites.
+services:
+  - type: worker
+    name: galega-receptor
+    runtime: docker
+    plan: 0.5c-512mb
+    region: virginia
+    numInstances: 1
+    dockerfilePath: ./services/receiver/Dockerfile
+    dockerContext: ./services/receiver
+    autoDeployTrigger: "off"
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: GALEGA_SITE_URL
+        sync: false
+      - key: GALEGA_SITE_SERVICE_TOKEN
+        sync: false

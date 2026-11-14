@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "galega-casa-cloudflare-teste-4e06b7",
+  "main": "worker/cloudflare.ts",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "galega-casa-cloudflare-teste-4e06b7",
+      "database_id": "bd5f8706-c785-465c-9084-cd52e7130898",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "vars": {
+    "IFOOD_ENVIRONMENT": "TEST",
+    "IFOOD_PRODUCTION_ENABLED": "false",
+    "GALEGA_DEPLOYMENT": "CLOUDFLARE_TEST"
+  },
+  "observability": {
+    "enabled": false
+  },
+  "account_id": "c6f7d6dcfac4cca38131213c54d4f0c1"
+}
