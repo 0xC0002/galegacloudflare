@@ -1,4 +1,4 @@
-# Galega — Laboratório Casa · TESTE
+# Galega - Laboratório Casa · TESTE
 
 Cópia independente da aplicação v5 para desenvolver as ideias da Casa e do chat. A aplicação da empresa permanece separada e não recebe alterações deste projeto.
 
