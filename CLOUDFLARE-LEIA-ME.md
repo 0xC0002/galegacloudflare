@@ -40,6 +40,8 @@ npm run deploy:cloudflare
 
 O comando usa scripts/deploy-cloudflare.mjs, que conserva os ajustes de execução no Windows e de espera pela propagação da publicação. Em um clone novo da branch master, o script reconhece a conta, o nome e o ID do banco já declarados em wrangler.jsonc; confere esse banco na conta autenticada antes de aplicar migrações. A ausência do arquivo local .cloudflare-target.json não deve criar outro Worker nem renomear o banco existente. Conflitos de conta, nome, banco ou arquivo local inválido interrompem a publicação.
 
+O Git mantém os fontes em LF por .gitattributes. O verificador também aceita um checkout existente em CRLF no Windows, ignorando somente o CR dessas quebras de linha. Os hashes aprovados continuam os mesmos e qualquer outra alteração nos arquivos protegidos permanece bloqueada. Não é necessário alterar a configuração global do Git ou recalcular os hashes para publicar no Windows. Para testar esse cenário sem rede: node tests/protected-source-line-endings.mjs.
+
 Somente uma configuração inicial com o ID de banco vazio de exemplo cria Worker/banco exclusivos. O script compila antes de publicar, preserva os segredos existentes e confere o bloqueio de acesso anônimo. Não cria assinatura paga nem altera DNS. Esta revisão não habilita publicação automática; ao configurar uma conexão de builds na Cloudflare, selecionar a branch master.
 
 A chave de autenticação e a chave de criptografia Meta não são sobrescritas em republicações. O código de primeiro acesso é gravado somente em .cloudflare-onboarding.json, privado e excluído deste pacote. Após concluir a inicialização, ele não permite criar outro responsável. Não guardar esse arquivo em Git ou incluí-lo em backups de código compartilhados.

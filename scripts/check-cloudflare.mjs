@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile,access} from 'node:fs/promises';
-import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {protectedSourceHash} from './protected-source-hash.mjs';
 export const readCloudflareConfig=async()=>JSON.parse(await readFile(new URL('../wrangler.jsonc',import.meta.url),'utf8'));
 export function validateCloudflareTarget(c,{remote=false}={}){
  assert.match(c.name,/^galega-casa-cloudflare-teste(?:-[a-f0-9]{6})?$/,'Use somente a cópia Cloudflare de teste.');
@@ -17,7 +17,7 @@ export async function checkCloudflareSource(){
  const c=validateCloudflareTarget(await readCloudflareConfig());
  await assert.rejects(access(new URL('../.openai/hosting.json',import.meta.url)),'A cópia externa não deve apontar para um Site do ChatGPT.');
  const base=JSON.parse(await readFile(new URL('../tests/fixtures/ifood-protected-sha256.json',import.meta.url),'utf8'));
- for(const [file,sha] of Object.entries(base.sha256))assert.equal(createHash('sha256').update(await readFile(new URL('../'+file,import.meta.url))).digest('hex'),sha,`Fluxo protegido alterado: ${file}`);
+ for(const [file,sha] of Object.entries(base.sha256))assert.equal(protectedSourceHash(await readFile(new URL('../'+file,import.meta.url))),sha,`Fluxo protegido alterado: ${file}`);
  const bridge=await readFile(new URL('../lib/lab-http.ts',import.meta.url),'utf8');assert.ok(!bridge.includes('preview-owner')&&!bridge.includes('import.meta.env.DEV'),'A cópia independente não aceita identidade de desenvolvimento.');
  const manifest=JSON.parse(await readFile(new URL('../public/manifest.webmanifest',import.meta.url),'utf8'));assert.equal(manifest.id,'/galega-cloudflare-teste');
  return c;
